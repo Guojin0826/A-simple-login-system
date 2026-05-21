@@ -1,79 +1,85 @@
 <?php
-if (session_status() === PHP_SESSION_NONE) {
-    session_start();
-}
+/**
+ * 管理员后台
+ */
 
-require 'check.php';
+require_once 'functions.php';
+require_once 'check.php';
+
+startSecureSession();
 
 if (!isset($_SESSION['user_id']) || $_SESSION['role'] !== 'admin') {
-    header("Location: login.php");
-    exit();
+    $_SESSION['error_message'] = '需要管理员权限';
+    redirect('login.php');
 }
 
-require 'users.php';
+require_once 'users.php';
 $pdo = getDbConnection();
-$s = '';
+$message = '';
 
-// 处理头像上传 —— 只存SESSION，不操作数据库（兼容你的表结构）
+// 处理头像上传
 if (isset($_FILES['avatar']) && $_FILES['avatar']['name'] != "") {
-    $targetDir = "uploads/";
-    if (!is_dir($targetDir)) {
-        mkdir($targetDir, 0755, true);
-    }
-
-    $fileTmpPath = $_FILES["avatar"]["tmp_name"];
-    $fileName = $_FILES["avatar"]["name"];
-    $fileSize = $_FILES["avatar"]["size"];
-    $fileExtension = strtolower(pathinfo($fileName, PATHINFO_EXTENSION));
-
-    $maxSize = 20 * 1024 * 1024;
-    if ($fileSize > $maxSize) {
-        $s = "抱歉，文件太大，最大为20MB。";
-        goto END;
-    }
-
-    $allowedExtensions = ['jpg', 'jpeg', 'png', 'gif'];
-    if (!in_array($fileExtension, $allowedExtensions)) {
-        $s = "抱歉，只允许上传图片文件（jpg, jpeg, png, gif）。";
-        goto END;
-    }
-
-    $finfo = finfo_open(FILEINFO_MIME_TYPE);
-    $fileMimeType = finfo_file($finfo, $fileTmpPath);
-    finfo_close($finfo);
-    $allowedMimeTypes = ['image/jpeg', 'image/png', 'image/gif'];
-    if (!in_array($fileMimeType, $allowedMimeTypes)) {
-        $s = "你上传的文件类型不正确, 只能上传 jpg, jpeg, png, gif 类型的图片。";
-        goto END;
-    }
-
-    $imageInfo = getimagesize($fileTmpPath);
-    if ($imageInfo === false) {
-        $s = "你上传的文件不是有效的图片。";
-        goto END;
-    }
-
-    $width = $imageInfo[0];
-    $height = $imageInfo[1];
-    if ($width > 4000 || $height > 4000) {
-        $s = "上传图片的分辨率过大，宽或高不得超过4000px。";
-        goto END;
-    }
-
-    $newFileName = bin2hex(random_bytes(8)) . "." . $fileExtension;
-    $targetFilePath = $targetDir . $newFileName;
-
-    if (!move_uploaded_file($fileTmpPath, $targetFilePath)) {
-        $s = "头像上传失败，请重试。";
-        goto END;
+    if (!isset($_POST['csrf_token']) || !verifyCSRFToken($_POST['csrf_token'])) {
+        $message = '安全验证失败';
     } else {
-        // 只保存到SESSION，不写入数据库（解决报错）
-        $_SESSION['avatar'] = $newFileName;
-        $s = "头像上传成功";
+        $targetDir = "uploads/";
+        if (!is_dir($targetDir)) {
+            mkdir($targetDir, 0755, true);
+        }
+
+        $fileTmpPath = $_FILES["avatar"]["tmp_name"];
+        $fileName = $_FILES["avatar"]["name"];
+        $fileSize = $_FILES["avatar"]["size"];
+        $fileExtension = strtolower(pathinfo($fileName, PATHINFO_EXTENSION));
+
+        $maxSize = 2 * 1024 * 1024; // 修改为2MB
+        if ($fileSize > $maxSize) {
+            $message = "文件太大，最大为2MB";
+        } else {
+            $allowedExtensions = ['jpg', 'jpeg', 'png', 'gif'];
+            if (!in_array($fileExtension, $allowedExtensions)) {
+                $message = "只允许上传图片文件";
+            } else {
+                $finfo = finfo_open(FILEINFO_MIME_TYPE);
+                $fileMimeType = finfo_file($finfo, $fileTmpPath);
+                finfo_close($finfo);
+                $allowedMimeTypes = ['image/jpeg', 'image/png', 'image/gif'];
+                
+                if (!in_array($fileMimeType, $allowedMimeTypes)) {
+                    $message = "文件类型不正确";
+                } else {
+                    $imageInfo = getimagesize($fileTmpPath);
+                    if ($imageInfo === false) {
+                        $message = "不是有效的图片";
+                    } else {
+                        $width = $imageInfo[0];
+                        $height = $imageInfo[1];
+                        if ($width > 2000 || $height > 2000) {
+                            $message = "图片分辨率过大，最大2000x2000";
+                        } else {
+                            $newFileName = bin2hex(random_bytes(8)) . "." . $fileExtension;
+                            $targetFilePath = $targetDir . $newFileName;
+
+                            if (!move_uploaded_file($fileTmpPath, $targetFilePath)) {
+                                $message = "头像上传失败";
+                            } else {
+                                // 保存到数据库
+                                try {
+                                    $updateStmt = $pdo->prepare("UPDATE users SET avatar = :avatar WHERE id = :id");
+                                    $updateStmt->execute(['avatar' => $newFileName, 'id' => $_SESSION['user_id']]);
+                                    $_SESSION['avatar'] = $newFileName;
+                                    $message = "头像上传成功";
+                                } catch (PDOException $e) {
+                                    $message = "保存失败";
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
-
-END:
 
 // 获取管理员信息
 $admin_id = $_SESSION['user_id'];
@@ -86,81 +92,118 @@ $users = $pdo->query("SELECT * FROM users")->fetchAll(PDO::FETCH_ASSOC);
 
 // 处理添加用户操作
 if (isset($_POST['add_user'])) {
-    $username = trim($_POST['add_username']);
-    $email = trim($_POST['add_email']);
-    $role = trim($_POST['add_role']);
-    $password = trim($_POST['add_password']);
-
-    if ($username && $email && $role && $password) {
-        $hashed_password = password_hash($password, PASSWORD_DEFAULT);
-
-        $stmtCheck = $pdo->prepare("SELECT COUNT(*) FROM users WHERE username = :username");
-        $stmtCheck->execute(['username' => $username]);
-        $userExists = $stmtCheck->fetchColumn();
-
-        if ($userExists) {
-            $s = "用户名已存在，请选择其他用户名";
-        } else {
-            $insertSql = "INSERT INTO users (username, email, role, password) VALUES (:username, :email, :role, :password)";
-            $stmt = $pdo->prepare($insertSql);
-            $stmt->execute([
-                    'username' => $username,
-                    'email' => $email,
-                    'role' => $role,
-                    'password' => $hashed_password
-            ]);
-            header("Location: admin.php");
-            exit();
-        }
+    if (!isset($_POST['csrf_token']) || !verifyCSRFToken($_POST['csrf_token'])) {
+        $message = '安全验证失败';
     } else {
-        $s = "请填写完整的用户信息";
+        $username = sanitizeInput($_POST['add_username'] ?? '');
+        $email = sanitizeInput($_POST['add_email'] ?? '');
+        $role = sanitizeInput($_POST['add_role'] ?? 'user');
+        $password = $_POST['add_password'] ?? '';
+
+        if (empty($username) || empty($email) || empty($password)) {
+            $message = "请填写完整的用户信息";
+        } elseif (!isValidEmail($email)) {
+            $message = "请输入有效的邮箱地址";
+        } elseif (strlen($password) < 6) {
+            $message = "密码至少需要6个字符";
+        } else {
+            try {
+                $stmtCheck = $pdo->prepare("SELECT COUNT(*) FROM users WHERE username = :username OR email = :email");
+                $stmtCheck->execute(['username' => $username, 'email' => $email]);
+                $userExists = $stmtCheck->fetchColumn();
+
+                if ($userExists) {
+                    $message = "用户名或邮箱已存在";
+                } else {
+                    $insertSql = "INSERT INTO users (username, email, role, password, created_at) VALUES (:username, :email, :role, :password, NOW())";
+                    $stmt = $pdo->prepare($insertSql);
+                    $stmt->execute([
+                        'username' => $username,
+                        'email' => $email,
+                        'role' => $role,
+                        'password' => password_hash($password, PASSWORD_DEFAULT)
+                    ]);
+                    redirect('admin.php');
+                }
+            } catch (PDOException $e) {
+                $message = "添加用户失败";
+            }
+        }
     }
 }
 
 // 处理编辑用户操作
 if (isset($_POST['edit_user'])) {
-    $user_id = $_POST['user_id'];
-    $username = trim($_POST['edit_username']);
-    $email = trim($_POST['edit_email']);
-    $role = trim($_POST['edit_role']);
-    $password = trim($_POST['edit_password']);
-
-    if (empty($password)) {
-        $updateSql = "UPDATE users SET username = :username, email = :email, role = :role WHERE id = :id";
-        $stmt = $pdo->prepare($updateSql);
-        $stmt->execute([
-                'id' => $user_id,
-                'username' => $username,
-                'email' => $email,
-                'role' => $role
-        ]);
+    if (!isset($_POST['csrf_token']) || !verifyCSRFToken($_POST['csrf_token'])) {
+        $message = '安全验证失败';
     } else {
-        $hashed_password = password_hash($password, PASSWORD_DEFAULT);
-        $updateSql = "UPDATE users SET username = :username, email = :email, role = :role, password = :password WHERE id = :id";
-        $stmt = $pdo->prepare($updateSql);
-        $stmt->execute([
-                'id' => $user_id,
-                'username' => $username,
-                'email' => $email,
-                'role' => $role,
-                'password' => $hashed_password
-        ]);
-    }
+        $user_id = (int)$_POST['user_id'];
+        $username = sanitizeInput($_POST['edit_username'] ?? '');
+        $email = sanitizeInput($_POST['edit_email'] ?? '');
+        $role = sanitizeInput($_POST['edit_role'] ?? 'user');
+        $password = $_POST['edit_password'] ?? '';
 
-    header("Location: admin.php");
-    exit();
+        if (empty($username) || empty($email)) {
+            $message = "用户名和邮箱不能为空";
+        } elseif (!isValidEmail($email)) {
+            $message = "请输入有效的邮箱地址";
+        } else {
+            try {
+                if (empty($password)) {
+                    $updateSql = "UPDATE users SET username = :username, email = :email, role = :role WHERE id = :id";
+                    $stmt = $pdo->prepare($updateSql);
+                    $stmt->execute([
+                        'id' => $user_id,
+                        'username' => $username,
+                        'email' => $email,
+                        'role' => $role
+                    ]);
+                } else {
+                    if (strlen($password) < 6) {
+                        $message = "密码至少需要6个字符";
+                    } else {
+                        $updateSql = "UPDATE users SET username = :username, email = :email, role = :role, password = :password WHERE id = :id";
+                        $stmt = $pdo->prepare($updateSql);
+                        $stmt->execute([
+                            'id' => $user_id,
+                            'username' => $username,
+                            'email' => $email,
+                            'role' => $role,
+                            'password' => password_hash($password, PASSWORD_DEFAULT)
+                        ]);
+                    }
+                }
+                if (empty($message)) {
+                    redirect('admin.php');
+                }
+            } catch (PDOException $e) {
+                $message = "编辑用户失败";
+            }
+        }
+    }
 }
 
 // 处理删除用户操作
 if (isset($_POST['delete_user'])) {
-    $user_id = $_POST['user_id'];
-
-    $deleteSql = "DELETE FROM users WHERE id = :id";
-    $stmt = $pdo->prepare($deleteSql);
-    $stmt->execute(['id' => $user_id]);
-
-    header("Location: admin.php");
-    exit();
+    if (!isset($_POST['csrf_token']) || !verifyCSRFToken($_POST['csrf_token'])) {
+        $message = '安全验证失败';
+    } else {
+        $user_id = (int)$_POST['user_id'];
+        
+        // 防止删除自己
+        if ($user_id === $_SESSION['user_id']) {
+            $message = "不能删除自己的账号";
+        } else {
+            try {
+                $deleteSql = "DELETE FROM users WHERE id = :id";
+                $stmt = $pdo->prepare($deleteSql);
+                $stmt->execute(['id' => $user_id]);
+                redirect('admin.php');
+            } catch (PDOException $e) {
+                $message = "删除用户失败";
+            }
+        }
+    }
 }
 
 ?>
@@ -170,10 +213,10 @@ if (isset($_POST['delete_user'])) {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>管理员后台</title>
+    <meta name="description" content="管理员后台">
+    <title>管理员后台 - <?php echo APP_NAME; ?></title>
     <link rel="stylesheet" type="text/css" href="style.css">
 </head>
-
 <body>
 <div class="admin-container">
     <!-- 顶部导航栏 -->
@@ -190,6 +233,7 @@ if (isset($_POST['delete_user'])) {
         </div>
         <div class="admin-header-right">
             <form method="POST" enctype="multipart/form-data" class="avatar-form">
+                <input type="hidden" name="csrf_token" value="<?php echo generateCSRFToken(); ?>">
                 <label class="upload-label">
                     <input type="file" name="avatar" accept="image/*" hidden>
                     <span class="upload-avatar-btn">更换头像</span>
@@ -199,9 +243,9 @@ if (isset($_POST['delete_user'])) {
         </div>
     </div>
 
-    <?php if ($s): ?>
-        <div class="message-toast <?php echo strpos($s, '成功') !== false ? 'success' : 'error'; ?>">
-            <?php echo $s; ?>
+    <?php if ($message): ?>
+        <div class="message-toast <?php echo strpos($message, '成功') !== false ? 'success' : 'error'; ?>">
+            <?php echo htmlspecialchars($message); ?>
         </div>
     <?php endif; ?>
 
@@ -249,10 +293,11 @@ if (isset($_POST['delete_user'])) {
         </div>
         <div class="card-body">
             <form method="POST" class="add-user-form">
+                <input type="hidden" name="csrf_token" value="<?php echo generateCSRFToken(); ?>">
                 <div class="form-row">
                     <div class="form-group">
                         <label>用户名</label>
-                        <input type="text" name="add_username" placeholder="请输入用户名" required>
+                        <input type="text" name="add_username" placeholder="请输入用户名" required minlength="3" maxlength="50">
                     </div>
                     <div class="form-group">
                         <label>邮箱</label>
@@ -269,7 +314,7 @@ if (isset($_POST['delete_user'])) {
                     </div>
                     <div class="form-group">
                         <label>密码</label>
-                        <input type="password" name="add_password" placeholder="请输入密码" required>
+                        <input type="password" name="add_password" placeholder="至少6个字符" required minlength="6">
                     </div>
                 </div>
                 <div class="form-actions">
@@ -321,9 +366,10 @@ if (isset($_POST['delete_user'])) {
                                             '<?php echo addslashes($user['email']); ?>',
                                             '<?php echo $user['role']; ?>'
                                         )">编辑</button>
-                                        <form method="POST" style="display:inline">
+                                        <form method="POST" style="display:inline" onsubmit="return confirm('确定要删除该用户吗？')">
+                                            <input type="hidden" name="csrf_token" value="<?php echo generateCSRFToken(); ?>">
                                             <input type="hidden" name="user_id" value="<?php echo $user['id']; ?>">
-                                            <button type="submit" name="delete_user" class="btn-delete" onclick="return confirm('确定要删除该用户吗？')">删除</button>
+                                            <button type="submit" name="delete_user" class="btn-delete">删除</button>
                                         </form>
                                     </div>
                                 </td>
@@ -351,10 +397,11 @@ if (isset($_POST['delete_user'])) {
             <button type="button" class="modal-close" onclick="closeEditModal()">&times;</button>
         </div>
         <form method="POST" class="edit-form">
+            <input type="hidden" name="csrf_token" value="<?php echo generateCSRFToken(); ?>">
             <input type="hidden" name="user_id" id="editUserId">
             <div class="form-group">
                 <label>用户名</label>
-                <input type="text" name="edit_username" id="editUsername" required>
+                <input type="text" name="edit_username" id="editUsername" required minlength="3" maxlength="50">
             </div>
             <div class="form-group">
                 <label>邮箱</label>
@@ -369,7 +416,7 @@ if (isset($_POST['delete_user'])) {
             </div>
             <div class="form-group">
                 <label>密码 <span class="hint">（留空则不修改）</span></label>
-                <input type="password" name="edit_password" placeholder="不修改请留空">
+                <input type="password" name="edit_password" placeholder="不修改请留空" minlength="6">
             </div>
             <div class="modal-actions">
                 <button type="submit" name="edit_user" class="btn-primary">保存修改</button>

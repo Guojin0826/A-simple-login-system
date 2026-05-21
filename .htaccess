@@ -1,0 +1,49 @@
+# 安全配置文件
+# author: guojin
+
+# 防止目录浏览
+Options -Indexes
+
+# 保护敏感文件
+<FilesMatch "(config\.php|functions\.php|users\.php|\.htaccess|\.env)$">
+    Order Allow,Deny
+    Deny from all
+</FilesMatch>
+
+# 防止PHP文件上传执行
+<FilesMatch "\.(php|phtml|php3|php4|php5)$">
+    <IfModule mod_rewrite.c>
+        RewriteEngine On
+        RewriteCond %{REQUEST_FILENAME} -f
+        RewriteRule ^uploads/ - [F,L]
+    </IfModule>
+</FilesMatch>
+
+# 设置默认字符集
+AddDefaultCharset UTF-8
+
+# 启用压缩
+<IfModule mod_deflate.c>
+    AddOutputFilterByType DEFLATE text/html text/plain text/xml text/css text/javascript application/javascript
+</IfModule>
+
+# 启用浏览器缓存
+<IfModule mod_expires.c>
+    ExpiresActive On
+    ExpiresByType text/css "access plus 1 month"
+    ExpiresByType application/javascript "access plus 1 month"
+    ExpiresByType image/jpeg "access plus 1 year"
+    ExpiresByType image/png "access plus 1 year"
+    ExpiresByType image/gif "access plus 1 year"
+</IfModule>
+
+# 安全头部
+<IfModule mod_headers.c>
+    Header set X-Content-Type-Options "nosniff"
+    Header set X-Frame-Options "SAMEORIGIN"
+    Header set X-XSS-Protection "1; mode=block"
+    Header set Referrer-Policy "strict-origin-when-cross-origin"
+</IfModule>
+
+# 限制上传文件大小 (10MB)
+LimitRequestBody 10485760
