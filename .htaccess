@@ -5,7 +5,7 @@
 Options -Indexes
 
 # 保护敏感文件
-<FilesMatch "(config\.php|functions\.php|users\.php|\.htaccess|\.env)$">
+<FilesMatch "(config\.php|functions\.php|users\.php|check\.php|\.htaccess|\.env|sql\.txt)$">
     Order Allow,Deny
     Deny from all
 </FilesMatch>

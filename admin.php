@@ -87,8 +87,8 @@ $stmtAdmin = $pdo->prepare("SELECT * FROM users WHERE id = :id");
 $stmtAdmin->execute(['id' => $admin_id]);
 $admin = $stmtAdmin->fetch(PDO::FETCH_ASSOC);
 
-// 获取所有用户信息
-$users = $pdo->query("SELECT * FROM users")->fetchAll(PDO::FETCH_ASSOC);
+// 获取所有用户信息（排除密码字段）
+$users = $pdo->query("SELECT id, username, email, role, avatar, created_at FROM users")->fetchAll(PDO::FETCH_ASSOC);
 
 // 处理添加用户操作
 if (isset($_POST['add_user'])) {

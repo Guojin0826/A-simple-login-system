@@ -22,7 +22,7 @@ define('UPLOAD_MAX_SIZE', 20 * 1024 * 1024); // 上传文件最大大小(字节)
 // 应用配置
 define('APP_NAME', '用户管理系统');
 define('APP_VERSION', '1.0.0');
-define('DEBUG_MODE', true);                // 调试模式
+define('DEBUG_MODE', false);               // 调试模式（生产环境请设为false）
 
 // 时区设置
 date_default_timezone_set('Asia/Shanghai');
