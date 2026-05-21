@@ -6,7 +6,7 @@
 require_once 'functions.php';
 require_once 'users.php';
 
-startSecureSession();
+startSession();
 
 $error = '';
 $success = '';

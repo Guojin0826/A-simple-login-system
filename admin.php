@@ -6,7 +6,7 @@
 require_once 'functions.php';
 require_once 'check.php';
 
-startSecureSession();
+startSession();
 
 if (!isset($_SESSION['user_id']) || $_SESSION['role'] !== 'admin') {
     $_SESSION['error_message'] = '需要管理员权限';

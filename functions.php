@@ -6,7 +6,7 @@
 /**
  * 安全地启动会话
  */
-function startSecureSession()
+function startSession()
 {
     if (session_status() === PHP_SESSION_NONE) {
         session_start();
